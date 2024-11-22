@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+set -e
+
+if [ "$#" -eq 0 ]; then
+    echo "Usage: $0 <command>"
+    exit 1
+fi
+
+command=$(printf '%s ' "$@")
+
+# find all directories containing .git folder under the current directory
+dirs=$(find . -maxdepth 2 -type d -name .git -prune -exec dirname {} \;)
+
+for dir in $dirs
+do
+  echo "$dir"
+  cd "$dir"
+
+  eval "$command"
+
+  cd ..
+done

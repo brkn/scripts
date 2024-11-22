@@ -1,0 +1,23 @@
+#! /usr/bin/env ruby
+
+require 'date'
+
+def get_last_commit_date(file)
+  commit_date = `git log -1 --format=%ad "#{file}"`.chomp
+  DateTime.parse(commit_date)
+end
+
+tracked_files = `git ls-files | grep "\.rb$"`.split("\n")
+
+file_commit_dates = tracked_files.map do |file|
+  commit_date = get_last_commit_date(file)
+
+  { file: file, commit_date: commit_date }
+end
+
+sorted_files = file_commit_dates.sort_by { |entry| entry[:commit_date] }
+
+# Print the sorted file list
+sorted_files.each do |entry|
+  puts "#{entry[:file]} - #{entry[:commit_date]}"
+end
