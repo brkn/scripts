@@ -1,0 +1,132 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'tempfile'
+require 'set'
+require 'open3'
+
+SITE_CATEGORIES = {
+  'games' => ['lichess.org', 'colonist.io'],
+  'social' => ['reddit.com', 'twitter.com', 'x.com', 'bsky.app'],
+  'video' => ['youtube.com', 'twitch.tv']
+}.freeze
+
+SELFCONTROL_CLI = '/Applications/SelfControl.app/Contents/MacOS/selfcontrol-cli'.freeze
+
+class InvalidDurationError < StandardError; end
+
+def parse_duration(input)
+  match = input
+            .downcase
+            .strip
+            .chomp('s')
+            .match(/^(\d+)(d|day|h|hr|hour|m|min|minute)$/)
+
+  raise InvalidDurationError, "Invalid duration format: #{input}" unless match
+
+  number = match.captures[0].to_i
+  unit = match.captures[1]
+
+  case unit
+  when 'm', 'min', 'minute' then number
+  when 'h', 'hr', 'hour' then number * 60
+  when 'd', 'day' then number * 1440
+  else raise InvalidDurationError, "Invalid time unit: #{unit}"
+  end
+end
+
+def get_sites(categories)
+  return SITE_CATEGORIES.values.flatten if categories.empty?
+
+  SITE_CATEGORIES.values_at(*categories).flatten
+end
+
+def create_blocklist(sites)
+  json_file = Tempfile.new(['blocklist', '.json'])
+  blocklist_file = Tempfile.new(['blocklist', '.selfcontrol'])
+
+  json_content = {
+    'BlockAsWhitelist' => false,
+    'HostBlacklist' => sites
+  }
+
+  File.write(json_file.path, JSON.pretty_generate(json_content))
+  system('plutil', '-convert', 'binary1', '-o', blocklist_file.path, json_file.path)
+
+  blocklist_file
+ensure
+  json_file.close
+  json_file.unlink
+end
+
+def validate_output(output, expected_sites)
+  blocklist_match = output.match(/ActiveBlocklist --> \(\n(.*?)\n\)/m)
+
+  return false unless blocklist_match
+
+  actual_sites = blocklist_match[1]
+                  .split(",")
+                  .map(&:strip)
+                  .map { |s| s.delete_prefix('"').delete_suffix('"') }
+                  .reject(&:empty?)
+
+  actual_set = actual_sites.to_set
+  expected_set = expected_sites.to_set
+
+  return true if actual_set == expected_set
+
+  differences = {
+    missing: expected_set - actual_set,
+    extra: actual_set - expected_set
+  }
+
+  warn "Warning: Blocklist validation failed"
+  warn "Missing sites: #{differences[:missing].inspect}" unless differences[:missing].empty?
+  warn "Extra sites: #{differences[:extra].inspect}" unless differences[:extra].empty?
+
+  false
+end
+
+def get_end_date(raw_duration)
+  duration_minutes = parse_duration(raw_duration)
+  end_date = Time.now + (duration_minutes * 60)
+
+  end_date.utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+end
+
+def run_selfcontrol(end_date, blocklist_path)
+  cmd = [
+    SELFCONTROL_CLI,
+    'start',
+    '--blocklist', blocklist_path,
+    '--enddate', end_date
+  ]
+
+  output, error, status = Open3.capture3(*cmd)
+  [output + error, status]
+end
+
+def main
+  if ARGV.empty?
+    warn "Usage: #{$PROGRAM_NAME} <duration> [category...]"
+    exit 1
+  end
+
+  end_date = get_end_date(ARGV.first)
+  sites = get_sites(ARGV[1..])
+  blocklist = create_blocklist(sites)
+  output, status = run_selfcontrol(end_date, blocklist.path)
+
+  warn output if ENV['DEBUG']
+  validate_output(output, sites)
+
+  exit status.success? ? 0 : 1
+rescue InvalidDurationError => e
+  warn "Error: #{e.message}"
+  exit 1
+ensure
+  blocklist&.close
+  blocklist&.unlink
+end
+
+main

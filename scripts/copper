@@ -1,0 +1,172 @@
+#! /usr/bin/env ruby
+
+# frozen_string_literal: true
+
+# NOTE: you should fix the: `YOUR_ORG_FIXME` part, or delete the pr creation part.
+
+require 'psych'
+require 'pathname'
+
+DEFAULT_FILE_PATH = '.rubocop_todo.yml'
+
+# CREATE_BRANCHES = true
+CREATE_BRANCHES = !ENV['CREATE_BRANCHES'].nil? || false
+
+REPO_NAME = Pathname.new(Dir.pwd).basename
+
+def to_kebab_case(str)
+  str.gsub(/([A-Z]+)([A-Z][a-z])/, '\1-\2')
+     .gsub(/([a-z\d])([A-Z])/, '\1-\2')
+     .downcase
+end
+
+def parse_todo_block_from_yaml(index, file_path = DEFAULT_FILE_PATH)
+  file_content = File.read(file_path)
+
+  block = file_content.split("\n\n")[index + 1] # exclude the header block
+
+  throw 'No todo block has left' if block.nil? || block.empty?
+
+  data = Psych.safe_load(block, permitted_classes: [Symbol])
+  cop_name = data.keys.first.to_s
+  excluded_files = data[cop_name]['Exclude'] || []
+
+  autocorrect = case block
+                when /supports safe autocorrection \(--autocorrect\)\./
+                  'safe'
+                when /supports unsafe autocorrection \(--autocorrect-all\)\./
+                  'unsafe'
+                else
+                  'none'
+                end
+
+  {
+    cop_name: cop_name,
+    excluded_files: excluded_files,
+    autocorrect: autocorrect
+  }
+end
+
+def remove_block_from_yaml(block_index, cop_name, file_path)
+  block_index_with_header = block_index + 1
+
+  file_content = File.read(file_path)
+  blocks = file_content.split("\n\n")
+  deleted_block = blocks.delete_at(block_index_with_header)
+  updated_content = blocks.join("\n\n")
+  File.write(file_path, updated_content)
+
+  puts "Removed #{cop_name} block from #{file_path} file"
+
+  deleted_block
+end
+
+def rubocop_autocorrect(excluded_files_array)
+  excluded_files = excluded_files_array.join(' ')
+  raise 'rubocop autocorrect failed' unless system("bundle exec rubocop -A #{excluded_files} > /dev/null")
+  # raise 'rubocop autocorrect failed' unless system("bundle exec rubocop -A #{excluded_files}")
+
+  puts 'Auto corrected files via Rubocop.'
+end
+
+def git_commit(cop_name, excluded_files_array)
+  kebab_cop_name = to_kebab_case(cop_name)
+  branch_name = "rubocop/fix-#{kebab_cop_name}"
+  excluded_files = excluded_files_array.join(' ')
+
+  if CREATE_BRANCHES
+    raise 'git branch creation failed' unless system("git checkout -b #{branch_name} > /dev/null")
+  end
+
+  raise 'git add files failed' unless system("git add #{excluded_files} #{DEFAULT_FILE_PATH} > /dev/null")
+  raise 'git commit for the fix failed' unless system("git commit -m 'Fix #{cop_name} violations' > /dev/null")
+
+  if CREATE_BRANCHES
+    raise 'git checkout back to main failed' unless system('git checkout main > /dev/null')
+    raise 'git push to origin failed' unless system("git push origin #{branch_name} > /dev/null")
+    raise 'git open the create pr link failed' unless system("open https://bitbucket.org/YOUR_ORG_FIXME/#{REPO_NAME}/pull-requests/new?source=#{branch_name}&t=1 > /dev/null")
+  end
+
+  # puts "Created git branch #{branch_name}.\n\n"
+  puts "Created a git commit for #{kebab_cop_name}...\n\n"
+
+  true
+end
+
+def print_exit_stats(fixed_cops)
+  if fixed_cops.empty?
+    puts "There wasn't any cops that can be fixed via autocorrect."
+  else
+    puts "Fixed cops: #{fixed_cops.join(', ')}"
+  end
+end
+
+def main(file_path = DEFAULT_FILE_PATH)
+  raise "Incorrect number of arguments.\nUsage: copper [max_number_of_commits]" if ARGV.length > 1
+
+  deleted_block = nil
+  index = 0
+  fixed_cops = []
+
+  trap 'SIGINT' do
+    puts 'Received interrupt. Shutting down gracefully.'
+
+    puts "FIXME, add the #{deleted_block} into the #{index} again"
+    puts 'FIXME, call git reset --hard HEAD'
+
+    print_exit_stats(fixed_cops)
+
+    exit 130
+  end
+
+  num_of_cops = begin
+    if ARGV[0].nil?
+      999_999_999
+    else
+      Integer(ARGV[0])
+    end
+  rescue StandardError
+    raise "max_number_of_commits should be a positive integer, recieved #{ARGV[0]}.\nUsage: copper [max_number_of_commits]"
+  end
+
+  puts "Will correct only #{num_of_cops} rules...\n\n" unless ARGV[0].nil?
+
+  while fixed_cops.length < num_of_cops
+    block = parse_todo_block_from_yaml(index)
+    autocorrect, excluded_files, cop_name = block.values_at(:autocorrect, :excluded_files, :cop_name)
+
+    if autocorrect == 'none' || excluded_files.empty?
+      index += 1
+      next
+    end
+
+    deleted_block = remove_block_from_yaml(index, cop_name, file_path)
+    rubocop_autocorrect(excluded_files)
+    git_commit(cop_name, excluded_files)
+
+    fixed_cops << cop_name
+
+    deleted_block = nil
+    index += 1 if CREATE_BRANCHES
+  end
+
+  print_exit_stats(fixed_cops)
+rescue StandardError => e
+  warn "Error: #{e.message}"
+  exit(1)
+end
+
+main
+
+### TODOS
+
+# -[ ] Create a README via chatgpt
+# -[ ] Wrap all these into a gem
+# -[ ] Publish the gem
+# -[ ] Add interrupt signal catcher that gracefully quits the script early and rollbacks the current unfinished loop
+# iteration
+# -[ ] Add ARGV[0] to accept a cop group name such `lint`, `naming` or `style`
+#      - Maybe name this argument such as `match` and this would match the cop name
+# -[ ] Add ARGV[1] for autocorrect type, one of [safe, unsafe]
+# -[ ] Add interactive mode, it should analyse the todo file and suggest commands to run
+#      - Or name this something like `copper suggest`

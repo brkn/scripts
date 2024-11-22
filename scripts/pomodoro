@@ -1,0 +1,52 @@
+#!/bin/zsh
+
+PATH_TO_DAILY="/path/to/your/notes/daily" # YOU SHOULD FIX THIS
+# Usage information
+usage() {
+  echo "Usage: pomodoro <duration> <task>"
+  exit 1
+}
+
+# TODO: prepends the pomodoro at the top. It should append instead.
+# This should be fixed at the `sed` part.
+# TODO: If I make self-control optional, then the sed also reflect this dynamic change.
+log_pomodoro() {
+  local today=$(date +%Y-%m-%d)
+  local current_time=$(date +%H:%M)
+  local note_file="$PATH_TO_DAILY/$today.md"
+
+  # Create file if doesn't exist
+  [[ ! -f $note_file ]] && echo "# $today\n\n## Pomodoros\n" > "$note_file"
+
+  # Add pomodoro section if missing
+  grep -q "^## Pomodoros" "$note_file" || sed -i '' -e '$a\\\n## Pomodoros\n' "$note_file"
+
+  # Log pomodoro under the Pomodoros section
+  sed -i '' "/^## Pomodoros/a\\
+- $task\\
+  - started: $current_time\\
+  - duration: $duration\\
+  - blocked sites: true\\
+" "$note_file"
+}
+
+# Check the number of arguments
+if [[ $# -ne 2 ]]; then
+  usage
+fi
+
+# Set variables
+duration=$1
+task=$2
+sound_name="Crystal"
+
+self-control "$duration"
+
+# Run the timer and display a notification
+if timer "$duration" -n "$task"; then
+  log_pomodoro
+  osascript -e "display notification \"☕\" with title \"Work Timer is up!\" subtitle \"Take a Break 😊\" sound name \"$sound_name\""
+else
+  echo "Timer failed"
+  exit 1
+fi

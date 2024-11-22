@@ -1,0 +1,198 @@
+# Firefox History Analysis
+
+The results can help you identify which sites you spend the most time on, which you might want to add to your blocking list.
+
+```elixir
+Mix.install([
+  {:exqlite, "~> 0.27"},
+  {:explorer, "~> 0.7"},
+  {:kino, "~> 0.11"},
+  {:kino_vega_lite, "~> 0.1.11"}
+])
+```
+
+## Setup and Imports
+
+```elixir
+alias Explorer.DataFrame
+alias Explorer.Series
+require Explorer.DataFrame
+```
+
+## File Path Helper Functions
+
+```elixir
+defmodule PathHelper do
+  def get_firefox_profile_path do
+    home = System.get_env("HOME")
+    macos_path = Path.join([home, "Library", "Application Support", "Firefox", "Profiles"])
+
+    if File.exists?(macos_path) do
+      macos_path
+    else
+      raise "Could not find Firefox profile directory"
+    end
+  end
+
+  def find_default_profile(base_path) do
+    base_path
+    |> File.ls!()
+    |> Enum.find(fn name ->
+      String.contains?(name, ".default") ||
+      String.contains?(name, "-default") ||
+      String.contains?(name, "-release")
+    end)
+    |> case do
+      nil -> raise "Could not find default Firefox profile"
+      profile -> Path.join(base_path, profile)
+    end
+  end
+
+  def get_places_db_path do
+    profile_path =
+      get_firefox_profile_path()
+      |> find_default_profile()
+
+    places_db = Path.join(profile_path, "places.sqlite")
+
+    unless File.exists?(places_db) do
+      raise "Could not find places.sqlite database"
+    end
+
+    # Create a temporary copy since Firefox might have the original locked
+    temp_path = Path.join(System.tmp_dir(), "firefox_history_temp.sqlite")
+    File.cp!(places_db, temp_path)
+    temp_path
+  end
+end
+```
+
+## Database Queries
+
+```elixir
+defmodule HistoryAnalyzer do
+  def query_history(db_path, days_back \\ 14) do
+    timestamp =
+      DateTime.utc_now()
+      |> DateTime.add(-days_back * 24 * 60 * 60, :second)
+      |> DateTime.to_unix(:microsecond)
+
+    {:ok, conn} = Exqlite.Sqlite3.open(db_path)
+
+    query = """
+    SELECT
+      p.url,
+      p.title,
+      COUNT(h.id) as visit_count,
+      MIN(h.visit_date) as first_visit,
+      MAX(h.visit_date) as last_visit
+    FROM moz_places p
+    JOIN moz_historyvisits h ON p.id = h.place_id
+    WHERE h.visit_date > ?
+    GROUP BY p.url
+    ORDER BY visit_count DESC
+    """
+
+    {:ok, statement} = Exqlite.Sqlite3.prepare(conn, query)
+    :ok = Exqlite.Sqlite3.bind(conn, statement, [timestamp])
+
+    results = chunk_step(conn, statement, [])
+
+    :ok = Exqlite.Sqlite3.release(conn, statement)
+    :ok = Exqlite.Sqlite3.close(conn)
+
+    results
+  end
+
+  defp chunk_step(conn, statement, acc) do
+    case Exqlite.Sqlite3.step(conn, statement) do
+      {:row, row} -> chunk_step(conn, statement, [row | acc])
+      :done -> Enum.reverse(acc)
+    end
+  end
+
+  def analyze_history(days_back \\ 14) do
+    db_path = PathHelper.get_places_db_path()
+
+    results =
+      db_path
+      |> query_history(days_back)
+      |> process_results()
+
+    File.rm!(db_path)
+
+    results
+    |> DataFrame.new()
+    |> DataFrame.group_by(["domain"])
+    |> DataFrame.summarise(
+      total_visits: sum(visit_count),
+      days_active: max(days_active),
+      avg_daily_visits: mean(avg_daily_visits)
+    )
+    |> DataFrame.sort_by(&[desc: &1["total_visits"]])
+  end
+
+  def process_results(results) do
+    results
+    |> Enum.map(fn [url, title, visits, first_visit, last_visit] ->
+      domain =
+        url
+        |> URI.parse()
+        |> Map.get(:host, url)
+        |> String.replace_prefix("www.", "")
+
+      first_dt = DateTime.from_unix!(first_visit, :microsecond)
+      last_dt = DateTime.from_unix!(last_visit, :microsecond)
+      days_active = DateTime.diff(last_dt, first_dt, :day) + 1
+
+      %{
+        domain: domain,
+        url: url,
+        title: title,
+        visit_count: visits,
+        first_visit: first_dt,
+        last_visit: last_dt,
+        days_active: days_active,
+        avg_daily_visits: visits / days_active
+      }
+    end)
+  end
+end
+```
+
+## Analysis and Visualization
+
+```elixir
+# Analyze the last 30 days of history
+df = HistoryAnalyzer.analyze_history(15)
+
+# Display top 20 sites
+df
+|> DataFrame.head(20)
+|> DataFrame.mutate(
+  avg_daily_visits: round(avg_daily_visits, 2)
+)
+|> Kino.DataTable.new()
+```
+
+## Bar Chart of Top Sites
+
+```elixir
+top_10_df = DataFrame.head(df, 10)
+
+VegaLite.new(width: 600, height: 400, title: "Top 10 Most Visited Websites")
+|> VegaLite.data_from_values(top_10_df)
+|> VegaLite.encode_field(:x, "domain", type: :nominal, sort: :y)
+|> VegaLite.encode_field(:y, "total_visits", type: :quantitative)
+|> VegaLite.mark(:bar)
+|> Kino.VegaLite.new()
+```
+
+## Export Results
+
+If you want to export the results to a CSV file:
+
+```elixir
+{:ok, csv} = DataFrame.dump_csv(df)
+Kino.Download.new(fn -> csv end, filename: "firefox_history_analysis.csv")
+```

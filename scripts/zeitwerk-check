@@ -1,0 +1,55 @@
+#!/bin/bash
+set -e
+
+# ANSI escape codes for colors
+RED='\033[0;31m'
+
+# Function to print colored output
+print_color() {
+  color_code=$1
+  message=$2
+
+  echo -e "\n"
+
+  if [ $# -eq 1 ]; then
+    # If only one argument is provided, set default color
+    tput sgr0
+    message=$1
+  else
+    # Set the specified color
+    tput setaf "$color_code"
+  fi
+
+  echo "$message"
+  tput sgr0
+
+  echo -e "\n"
+}
+
+rails6_gemfiles=$(fd -p  'gemfile$' --max-depth 2 | xargs ag "'rails', '~> 6" -l)
+
+dirs=$(echo $rails6_gemfiles | xargs dirname)
+
+command='bundle exec rails zeitwerk:check'
+
+original_dir=$(pwd)
+
+# loop through the directories and run the command for each one
+for dir in $dirs
+do
+  echo "$dir"
+  # change into the directory
+  cd "$dir"
+
+  # Run the command provided as an argument
+  if eval "$command" >/dev/null 2>&1; then
+    # Command succeeded, no need to take any action
+    print_color "Zeitwerk looks good for directory $dir"
+  else
+    # Command failed, display an error message
+    print_color $RED "Zeitwerk check failed for directory $dir"
+  fi
+
+  # change back to the original directory
+  cd "$original_dir"
+done
