@@ -1,6 +1,6 @@
 # Scripts
 
-Dumb scripts I've created over the last couple of years.
+Dumb cute little scripts I've created over the last couple of years.
 
 - [copper](#copper) - Fix RuboCop violations automatically
 - [firefox-history-analysis](#firefox-history-analysis) - Analyze Firefox browsing habits

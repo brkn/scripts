@@ -157,16 +157,3 @@ rescue StandardError => e
 end
 
 main
-
-### TODOS
-
-# -[ ] Create a README via chatgpt
-# -[ ] Wrap all these into a gem
-# -[ ] Publish the gem
-# -[ ] Add interrupt signal catcher that gracefully quits the script early and rollbacks the current unfinished loop
-# iteration
-# -[ ] Add ARGV[0] to accept a cop group name such `lint`, `naming` or `style`
-#      - Maybe name this argument such as `match` and this would match the cop name
-# -[ ] Add ARGV[1] for autocorrect type, one of [safe, unsafe]
-# -[ ] Add interactive mode, it should analyse the todo file and suggest commands to run
-#      - Or name this something like `copper suggest`
