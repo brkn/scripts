@@ -1,0 +1,73 @@
+#!/usr/bin/env ruby
+
+# frozen_string_literal: true
+
+require 'date'
+
+NOTES_DIR = '/path/to/your/notes/daily' # YOU SHOULD FIX THIS
+
+class TodayFile
+  DAILY_FILE_TEMPLATE = <<~MARKDOWN
+    # %<today>s
+
+    ## Pomodoros
+  MARKDOWN
+
+  POMODORO_ITEM_TEMPLATE = <<~MARKDOWN
+    - %<task>s
+      - started: %<started>s
+      - duration: %<duration>s
+      - blocked sites: %<blocks>s
+  MARKDOWN
+
+  def initialize
+    ensure_exists!
+    ensure_has_section!
+  end
+
+  def add_pomodoro!(task, duration, block_sites)
+    entry = format(
+      POMODORO_ITEM_TEMPLATE,
+      task: task,
+      started: Time.now.strftime('%H:%M'),
+      duration: duration,
+      blocks: block_sites
+    )
+
+    lines = File.readlines(path)
+    pomodoro_header_index = lines.find_index { |l| l.strip == '## Pomodoros' }
+
+    next_header_index = lines[pomodoro_header_index + 1..].find_index { |l| l.start_with?('## ') }
+    insert_at = next_header_index ? pomodoro_header_index + next_header_index : -1
+
+    lines.insert(insert_at, entry)
+    File.write(path, lines.join)
+  end
+
+  private
+
+  def path
+    "#{NOTES_DIR}/#{Date.today}.md"
+  end
+
+  def ensure_exists!
+    return if File.exist?(path)
+
+    daily_file = format(DAILY_FILE_TEMPLATE, today: Date.today.to_s)
+
+    File.write(path, daily_file)
+  end
+
+  def ensure_has_section!
+    daily_markdown = File.read(path)
+    return if daily_markdown.include?('## Pomodoros')
+
+    new_daily_markdown = "daily_markdown\n## Pomodoros\n"
+    File.write(path, new_daily_markdown)
+  end
+end
+
+abort 'Usage: log_pomodoro <task> <duration> <block_sites>' if ARGV.length != 3
+task, duration, block_sites = ARGV
+
+TodayFile.new.add_pomodoro!(task, duration, block_sites)
