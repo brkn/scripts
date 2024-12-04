@@ -37,7 +37,7 @@ class TodayFile
     lines = File.readlines(path)
     pomodoro_header_index = lines.find_index { |l| l.strip == '## Pomodoros' }
 
-    next_header_index = lines[pomodoro_header_index + 1..].find_index { |l| l.start_with?('## ') }
+    next_header_index = lines[pomodoro_header_index + 1..].find_index { |l| l.start_with?('#') }
     insert_at = next_header_index ? pomodoro_header_index + next_header_index : -1
 
     lines.insert(insert_at, entry)
@@ -62,7 +62,10 @@ class TodayFile
     daily_markdown = File.read(path)
     return if daily_markdown.include?('## Pomodoros')
 
-    new_daily_markdown = "daily_markdown\n## Pomodoros\n"
+    stripped_daily_markdown = daily_markdown.gsub("# #{Date.today}", '').lstrip
+    prefix_with_pomodoros_section = format(DAILY_FILE_TEMPLATE, today: Date.today.to_s)
+
+    new_daily_markdown = "#{prefix_with_pomodoros_section}\n#{stripped_daily_markdown}"
     File.write(path, new_daily_markdown)
   end
 end
