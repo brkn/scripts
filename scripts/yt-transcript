@@ -1,0 +1,38 @@
+#!/bin/bash
+set -euo pipefail
+
+OUTPUT_DIR="resources/dumps/youtube"
+
+if ! command -v yt-dlp >/dev/null 2>&1; then
+    echo "Error: yt-dlp command not found" >&2
+    exit 1
+fi
+
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <youtube-url>" >&2
+    exit 1
+fi
+
+# TODO: fetch chapter names
+# example: `yt-dlp --dump-json https://www.youtube.com/watch\?v\=4j0lCbUXahw | jq --raw-output ".chapters[]"`
+# then squeeze these chapter names between the subtitles as markdown h2
+# Add validation for if jq is installed?
+
+url=$1
+
+title=$(yt-dlp --print "%(title)s" --skip-download "$url")
+filename=$(echo "$title" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//')
+
+mkdir -p "$OUTPUT_DIR"
+yt-dlp --write-auto-subs --sub-format srt --skip-download -o "$OUTPUT_DIR/$filename" "$url"
+
+subtitle_file=$(ls "$OUTPUT_DIR/$filename".*.* 2>/dev/null | head -n1)
+[ -z "$subtitle_file" ] && echo "Error: No subtitle file found" >&2 && exit 1
+
+md_file="$OUTPUT_DIR/$filename.md"
+echo "# $title" > "$md_file"
+echo "" >> "$md_file"
+cat "$subtitle_file" >> "$md_file"
+rm "$subtitle_file"
+
+echo "Saved to: $md_file"
