@@ -4,58 +4,116 @@
 
 require 'date'
 
-NOTES_DIR = '/path/to/your/notes/daily' # YOU SHOULD FIX THIS
+# This constant has to be fixed for the script to work properly
+NOTES_DIR = '/path/to/your/notes/daily'
 
-class TodayFile
-  DAILY_FILE_TEMPLATE = <<~MARKDOWN
-    # %<today>s
+# TODO: fix pomodoro item textblock placed into incorrect place when there is no blank line after pomodoro header.
+# Example:
+# ```md
+# # 01-01-2026
+# <pomodoro item would render here>
+# ## Pomodoro
+# ## Another header
+# ```
 
-    ## Pomodoros
-  MARKDOWN
+# TODO: Low prio: Nothing is memoized, but it's fast enough.
+
+class PomodoroItem
+  class InvalidDurationError < StandardError; end
 
   POMODORO_ITEM_TEMPLATE = <<~MARKDOWN
     - %<task>s
       - started: %<started>s
       - duration: %<duration>s
-      - blocked sites: %<blocks>s
+      - blocked sites: %<blocked_sites>s
   MARKDOWN
 
-  def initialize
-    ensure_exists!
-    ensure_has_section!
+  # This method is unused currently, keeping it incase I want to add validation or smth
+  def self.build(task, duration, blocked_sites)
+    # new(task, duration, blocked_sites).to_md
   end
 
-  def add_pomodoro!(task, duration, block_sites)
-    entry = format(
+  def initialize(task, duration, blocked_sites)
+    @task = task
+    @duration = duration
+    @blocked_sites = blocked_sites
+  end
+
+  attr_reader :task, :duration, :blocked_sites
+
+  def to_md
+    format(
       POMODORO_ITEM_TEMPLATE,
       task: task,
-      started: Time.now.strftime('%H:%M'),
+      started: started_at,
       duration: duration,
-      blocks: block_sites
+      blocked_sites: blocked_sites
     )
+  end
 
+  # This is called at the end of the script when we do `puts pomodoro_item`
+  def to_s
+    <<~FORMAT_FOR_CLI_OUTPUT
+      started: #{started_at}
+      duration: #{duration}
+      blocked sites: #{blocked_sites}
+    FORMAT_FOR_CLI_OUTPUT
+  end
+
+  private
+
+  def started_at
+    starting_at = Time.now - duration_in_seconds
+
+    starting_at.strftime('%H:%M')
+  end
+
+  def duration_in_seconds
+    match = duration
+              .downcase
+              .strip
+              .match(/^(\d+)(d|day|days|h|hr|hour|hours|m|min|minute|minutes|s|sec|second|seconds)$/)
+
+    raise InvalidDurationError, "Invalid duration format: #{duration}" unless match
+
+    number = match.captures[0].to_i
+    unit = match.captures[1].chomp('s')
+
+    case unit
+    # Parsing empty string as seconds since we are chomping plurals, so '10s' becomes '10'
+    when '', 's', 'second', 'sec' then number
+    when 'm', 'min', 'minute' then number * 60
+    when 'h', 'hr', 'hour' then number * 60 * 60
+    when 'd', 'day' then number * 1440 * 60
+    else raise InvalidDurationError, "Invalid time unit: #{unit}"
+    end
+  end
+end
+
+class TodayFile
+  NEW_DAILY_FILE_TEMPLATE = <<~MARKDOWN
+    # %<today>s
+
+    ## Pomodoros
+  MARKDOWN
+
+  def add_pomodoro!(entry)
     lines = File.readlines(path)
     pomodoro_header_index = lines.find_index { |l| l.strip == '## Pomodoros' }
 
     next_header_index = lines[pomodoro_header_index + 1..].find_index { |l| l.start_with?('#') }
     insert_at = next_header_index ? pomodoro_header_index + next_header_index : -1
 
-    lines.insert(insert_at, entry)
+    lines.insert(insert_at, entry.to_md)
     File.write(path, lines.join)
-  end
-
-  private
-
-  def path
-    "#{NOTES_DIR}/#{Date.today}.md"
   end
 
   def ensure_exists!
     return if File.exist?(path)
 
-    daily_file = format(DAILY_FILE_TEMPLATE, today: Date.today.to_s)
+    new_daily_file = format(NEW_DAILY_FILE_TEMPLATE, today: Date.today.to_s)
 
-    File.write(path, daily_file)
+    File.write(path, new_daily_file)
   end
 
   def ensure_has_section!
@@ -63,14 +121,27 @@ class TodayFile
     return if daily_markdown.include?('## Pomodoros')
 
     stripped_daily_markdown = daily_markdown.gsub("# #{Date.today}", '').lstrip
-    prefix_with_pomodoros_section = format(DAILY_FILE_TEMPLATE, today: Date.today.to_s)
+    prefix_with_pomodoros_section = format(NEW_DAILY_FILE_TEMPLATE, today: Date.today.to_s)
 
     new_daily_markdown = "#{prefix_with_pomodoros_section}\n#{stripped_daily_markdown}"
     File.write(path, new_daily_markdown)
   end
+
+  private
+
+  def path
+    "#{NOTES_DIR}/#{Date.today}.md"
+  end
 end
 
-abort 'Usage: log_pomodoro <task> <duration> <block_sites>' if ARGV.length != 3
-task, duration, block_sites = ARGV
+abort 'Usage: log_pomodoro <task> <duration> <blocked_sites>' if ARGV.length != 3
 
-TodayFile.new.add_pomodoro!(task, duration, block_sites)
+task, duration, blocked_sites = ARGV
+pomodoro_item = PomodoroItem.new(task, duration, blocked_sites)
+
+TodayFile.new
+         .tap(&ensure_exists!)
+         .tap(&ensure_has_section!)
+         .add_pomodoro!(pomodoro_item)
+
+puts pomodoro_item
