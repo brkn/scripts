@@ -43,6 +43,7 @@ end
 def main
   system('self-control', options.duration) if options.block_sites
 
+  # TODO: trap exits at this process, ensure logging even when process is cancelled
   if system('timer', options.duration, '-n', options.task)
     log_pomodoro if options.log
     system('osascript', '-e', COMPLETION_NOTIFICATION)
