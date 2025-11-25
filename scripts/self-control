@@ -117,6 +117,7 @@ def main
   blocklist = create_blocklist(sites)
   output, status = run_selfcontrol(end_date, blocklist.path)
 
+  # TODO: print success message even when debug is not turned on
   warn output if ENV['DEBUG']
   validate_output(output, sites)
 
