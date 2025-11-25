@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -e
+set -u
+set -o pipefail
+
+# If the piped input is a url then this opens it in the browser
+
+# TODO:
+# - Fix script not exiting when nothing is piped. It hangs
+# - More strict regex for url validation
+
+while IFS= read -r line; do
+  if [[ "$line" =~ ^https?:// ]]; then
+    open "$line" < /dev/null
+  fi
+done

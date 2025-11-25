@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+# Creates an endless loop that echoes new text in the clipboard
+# So, you can do for example `pastas | wget`, or `pastas | urlopen`
+
+# Source: https://codeberg.org/EvanHahn/dotfiles/raw/commit/843b9ee13d949d346a4a73ccee2a99351aed285b/home/bin/bin/pastas
+# Replaced the pasta with macos `pbpaste` for simplicity
+
+set -e
+set -u
+set -o pipefail
+
+trap 'exit 0' SIGINT
+
+last_value=''
+
+while true
+do
+  value="$(pbpaste)"
+
+  if [ "$last_value" != "$value" ]; then
+    echo "$value"
+    last_value="$value"
+  fi
+
+  sleep 0.1
+done
